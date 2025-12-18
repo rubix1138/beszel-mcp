@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "beszel": {
+      "command": "uvx",
+      "args": ["--from", "/absolute/path/to/beszel-mcp", "beszel-mcp"],
+      "env": {
+        "BESZEL_URL": "http://localhost:8090",
+        "BESZEL_EMAIL": "admin@example.com",
+        "BESZEL_PASSWORD": "your-password-here"
+      }
+    }
+  }
+}

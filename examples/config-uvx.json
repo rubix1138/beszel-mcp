@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "beszel": {
+      "command": "uvx",
+      "args": ["--from", ".", "fastmcp", "run", "src/beszel_mcp/server.py"],
+      "env": {
+        "BESZEL_URL": "http://localhost:8090",
+        "BESZEL_EMAIL": "admin@example.com",
+        "BESZEL_PASSWORD": "your-password-here"
+      }
+    }
+  }
+}

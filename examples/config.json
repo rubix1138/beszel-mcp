@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "beszel": {
+      "command": "python",
+      "args": ["-m", "beszel_mcp"],
+      "env": {
+        "BESZEL_URL": "http://localhost:8090",
+        "BESZEL_EMAIL": "admin@example.com",
+        "BESZEL_PASSWORD": "your-password-here"
+      }
+    }
+  }
+}
