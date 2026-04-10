@@ -196,6 +196,35 @@ async def query_system_stats(
 
 
 @mcp.tool()
+async def get_system(name_or_id: str) -> dict:
+    """Get a single monitored system by name or record ID.
+
+    Args:
+        name_or_id: System name (e.g. 'web-server', 'db-01') or PocketBase record ID
+
+    Returns:
+        System record with current status and metadata, or an error dict if not found
+    """
+    client = get_client()
+    await ensure_authenticated(client)
+
+    # Try exact name match first
+    result = await client.get_list(
+        collection="systems",
+        filter=f"name = '{name_or_id}'",
+        per_page=1,
+    )
+    if result.get("items"):
+        return result["items"][0]
+
+    # Fall back to direct ID lookup
+    try:
+        return await client.get_one(collection="systems", record_id=name_or_id)
+    except Exception:
+        return {"error": f"No system found with name or ID '{name_or_id}'"}
+
+
+@mcp.tool()
 async def query_container_stats(
     container_id: str,
     start_time: Optional[str] = None,

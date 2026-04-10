@@ -41,6 +41,27 @@ class PocketBaseClient:
         except Exception as e:
             raise Exception(f"Failed to authenticate with PocketBase: {e}")
 
+    async def _authenticated_request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
+        """Make an authenticated request, re-authing once on 401 (handles token expiry)."""
+        for attempt in range(2):
+            response = await self.client.request(
+                method,
+                f"{self.base_url}{path}",
+                headers=self._get_headers(),
+                **kwargs,
+            )
+            if response.status_code == 401 and attempt == 0 and self.email:
+                # Token expired — re-authenticate and retry once
+                self.token = None
+                await self.authenticate()
+                continue
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                raise Exception(f"API error ({path}): {e.response.text}")
+            return response.json()
+        raise Exception("Authentication failed after retry")
+
     def _get_headers(self) -> dict[str, str]:
         """Get headers for API requests."""
         headers = {"Content-Type": "application/json"}
@@ -82,18 +103,9 @@ class PocketBaseClient:
         if expand:
             params["expand"] = expand
 
-        try:
-            response = await self.client.get(
-                f"{self.base_url}/api/collections/{collection}/records",
-                params=params,
-                headers=self._get_headers(),
-            )
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            raise Exception(f"Failed to get records from {collection}: {e.response.text}")
-        except Exception as e:
-            raise Exception(f"Failed to get records from {collection}: {e}")
+        return await self._authenticated_request(
+            "GET", f"/api/collections/{collection}/records", params=params
+        )
 
     async def get_one(
         self,
@@ -115,18 +127,9 @@ class PocketBaseClient:
         if expand:
             params["expand"] = expand
 
-        try:
-            response = await self.client.get(
-                f"{self.base_url}/api/collections/{collection}/records/{record_id}",
-                params=params,
-                headers=self._get_headers(),
-            )
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            raise Exception(f"Failed to get record {record_id} from {collection}: {e.response.text}")
-        except Exception as e:
-            raise Exception(f"Failed to get record {record_id} from {collection}: {e}")
+        return await self._authenticated_request(
+            "GET", f"/api/collections/{collection}/records/{record_id}", params=params
+        )
 
     async def query_stats(
         self,
