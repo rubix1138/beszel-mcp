@@ -9,13 +9,6 @@ class PocketBaseClient:
     """Client for interacting with PocketBase API."""
 
     def __init__(self, base_url: str, email: Optional[str] = None, password: Optional[str] = None):
-        """Initialize the PocketBase client.
-        
-        Args:
-            base_url: The base URL of the PocketBase instance
-            email: Optional admin email for authentication
-            password: Optional admin password for authentication
-        """
         self.base_url = base_url.rstrip("/")
         self.email = email
         self.password = password
@@ -23,26 +16,45 @@ class PocketBaseClient:
         self.client = httpx.AsyncClient(timeout=30.0)
 
     async def authenticate(self) -> None:
-        """Authenticate with PocketBase using admin credentials."""
+        """Authenticate with PocketBase using user credentials."""
         if not self.email or not self.password:
             return
 
         try:
             response = await self.client.post(
                 f"{self.base_url}/api/collections/users/auth-with-password",
-                json={
-                    "identity": self.email,
-                    "password": self.password,
-                },
+                json={"identity": self.email, "password": self.password},
             )
             response.raise_for_status()
-            data = response.json()
-            self.token = data.get("token")
+            self.token = response.json().get("token")
         except Exception as e:
-            raise Exception(f"Failed to authenticate with PocketBase: {e}")
+            raise Exception(f"Failed to authenticate with Beszel: {e}")
+
+    async def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
+        """Make an authenticated request, re-authing once on 401."""
+        for attempt in range(2):
+            headers = {"Content-Type": "application/json"}
+            if self.token:
+                headers["Authorization"] = f"Bearer {self.token}"
+
+            response = await self.client.request(method, f"{self.base_url}{path}", headers=headers, **kwargs)
+
+            if response.status_code == 401 and attempt == 0 and self.email:
+                # Token expired — re-authenticate and retry once
+                self.token = None
+                await self.authenticate()
+                continue
+
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                raise Exception(f"Beszel API error ({path}): {e.response.text}")
+
+            return response.json()
+
+        raise Exception("Authentication failed after retry")
 
     def _get_headers(self) -> dict[str, str]:
-        """Get headers for API requests."""
         headers = {"Content-Type": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -57,24 +69,7 @@ class PocketBaseClient:
         sort: Optional[str] = None,
         expand: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Get a paginated list of records from a collection.
-        
-        Args:
-            collection: The collection name
-            page: Page number (default: 1)
-            per_page: Number of records per page (default: 50)
-            filter: PocketBase filter string
-            sort: Sort order (e.g., "-created")
-            expand: Fields to expand (e.g., "relField1,relField2")
-            
-        Returns:
-            Dictionary containing paginated results
-        """
-        params = {
-            "page": page,
-            "perPage": per_page,
-        }
-        
+        params: dict[str, Any] = {"page": page, "perPage": per_page}
         if filter:
             params["filter"] = filter
         if sort:
@@ -82,18 +77,7 @@ class PocketBaseClient:
         if expand:
             params["expand"] = expand
 
-        try:
-            response = await self.client.get(
-                f"{self.base_url}/api/collections/{collection}/records",
-                params=params,
-                headers=self._get_headers(),
-            )
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            raise Exception(f"Failed to get records from {collection}: {e.response.text}")
-        except Exception as e:
-            raise Exception(f"Failed to get records from {collection}: {e}")
+        return await self._request("GET", f"/api/collections/{collection}/records", params=params)
 
     async def get_one(
         self,
@@ -101,32 +85,10 @@ class PocketBaseClient:
         record_id: str,
         expand: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Get a single record by ID.
-        
-        Args:
-            collection: The collection name
-            record_id: The record ID
-            expand: Fields to expand
-            
-        Returns:
-            Dictionary containing the record
-        """
         params = {}
         if expand:
             params["expand"] = expand
-
-        try:
-            response = await self.client.get(
-                f"{self.base_url}/api/collections/{collection}/records/{record_id}",
-                params=params,
-                headers=self._get_headers(),
-            )
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            raise Exception(f"Failed to get record {record_id} from {collection}: {e.response.text}")
-        except Exception as e:
-            raise Exception(f"Failed to get record {record_id} from {collection}: {e}")
+        return await self._request("GET", f"/api/collections/{collection}/records/{record_id}", params=params)
 
     async def query_stats(
         self,
@@ -136,18 +98,6 @@ class PocketBaseClient:
         per_page: int = 100,
         sort: str = "-created",
     ) -> dict[str, Any]:
-        """Query statistics records with filtering.
-        
-        Args:
-            collection: The stats collection name (system_stats or container_stats)
-            filter: PocketBase filter string
-            page: Page number
-            per_page: Number of records per page
-            sort: Sort order
-            
-        Returns:
-            Dictionary containing paginated statistics
-        """
         return await self.get_list(
             collection=collection,
             page=page,
@@ -157,7 +107,6 @@ class PocketBaseClient:
         )
 
     async def close(self) -> None:
-        """Close the HTTP client."""
         await self.client.aclose()
 
     def build_time_filter(
@@ -166,21 +115,9 @@ class PocketBaseClient:
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
     ) -> str:
-        """Build a time-based filter string.
-        
-        Args:
-            field: The field name (e.g., "created")
-            start_time: Start time in ISO 8601 format
-            end_time: End time in ISO 8601 format
-            
-        Returns:
-            PocketBase filter string
-        """
         filters = []
-        
         if start_time:
             filters.append(f"{field} >= '{start_time}'")
         if end_time:
             filters.append(f"{field} <= '{end_time}'")
-            
         return " && ".join(filters) if filters else ""
